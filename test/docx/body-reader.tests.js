@@ -1,6 +1,15 @@
 var assert = require("assert");
 var path = require("path");
 
+var _ = require("underscore");
+var hamjest = require("hamjest");
+var promiseThat = hamjest.promiseThat;
+var allOf = hamjest.allOf;
+var contains = hamjest.contains;
+var hasProperties = hamjest.hasProperties;
+var willBe = hamjest.willBe;
+var FeatureMatcher = hamjest.FeatureMatcher;
+
 var BodyReader = require("../../lib/docx/body-reader").BodyReader;
 var documents = require("../../lib/documents");
 var xml = require("../../lib/xml");
@@ -175,6 +184,13 @@ test("isBold is true if bold element is present", function() {
     assert.equal(run.isBold, true);
 });
 
+test("isBold is false if bold element is present and w:val is false", function() {
+    var boldXml = new XmlElement("w:b", {"w:val": "false"});
+    var runXml = runWithProperties([boldXml]);
+    var run = readXmlElementValue(runXml);
+    assert.equal(run.isBold, false);
+});
+
 test("isUnderline is false if underline element is not present", function() {
     var runXml = runWithProperties([]);
     var run = readXmlElementValue(runXml);
@@ -212,6 +228,43 @@ test("isItalic is true if bold element is present", function() {
     var runXml = runWithProperties([italicXml]);
     var run = readXmlElementValue(runXml);
     assert.equal(run.isItalic, true);
+});
+
+var booleanRunProperties = [
+    {name: "isBold", tagName: "w:b"},
+    {name: "isUnderline", tagName: "w:u"},
+    {name: "isItalic", tagName: "w:i"},
+    {name: "isStrikethrough", tagName: "w:strike"},
+];
+
+booleanRunProperties.forEach(function(runProperty) {
+    test(runProperty.name + " is false if " + runProperty.tagName + " is present and w:val is false", function() {
+        var propertyXml = new XmlElement(runProperty.tagName, {"w:val": "false"});
+        var runXml = runWithProperties([propertyXml]);
+        var run = readXmlElementValue(runXml);
+        assert.equal(run[runProperty.name], false);
+    });
+    
+    test(runProperty.name + " is false if " + runProperty.tagName + " is present and w:val is 0", function() {
+        var propertyXml = new XmlElement(runProperty.tagName, {"w:val": "0"});
+        var runXml = runWithProperties([propertyXml]);
+        var run = readXmlElementValue(runXml);
+        assert.equal(run[runProperty.name], false);
+    });
+    
+    test(runProperty.name + " is true if " + runProperty.tagName + " is present and w:val is true", function() {
+        var propertyXml = new XmlElement(runProperty.tagName, {"w:val": "true"});
+        var runXml = runWithProperties([propertyXml]);
+        var run = readXmlElementValue(runXml);
+        assert.equal(run[runProperty.name], true);
+    });
+    
+    test(runProperty.name + " is true if " + runProperty.tagName + " is present and w:val is 1", function() {
+        var propertyXml = new XmlElement(runProperty.tagName, {"w:val": "1"});
+        var runXml = runWithProperties([propertyXml]);
+        var run = readXmlElementValue(runXml);
+        assert.equal(run[runProperty.name], true);
+    });
 });
 
 test("run has baseline vertical alignment by default", function() {
@@ -394,57 +447,120 @@ test('_GoBack bookmark is ignored', function() {
     assert.deepEqual(result.value, []);
 });
 
-test("can read imagedata elements with r:id attribute", function() {
-    var imagedataElement = new XmlElement("v:imagedata", {"r:id": "rId5", "o:title": "It's a hat"});
-    
-    var imageBuffer = new Buffer("Not an image at all!");
-    var reader = new BodyReader({
+var IMAGE_BUFFER = new Buffer("Not an image at all!");
+var IMAGE_RELATIONSHIP_ID = "rId5";
+
+function isSuccess(valueMatcher) {
+    return hasProperties({
+        messages: [],
+        value: valueMatcher
+    });
+}
+
+function isImage(options) {
+    var matcher = hasProperties(_.extend({type: "image"}, _.omit(options, "buffer")));
+    if (options.buffer) {
+        return allOf(
+            matcher,
+            new FeatureMatcher(willBe(options.buffer), "buffer", "buffer", function(element) {
+                return element.read();
+            })
+        );
+    } else {
+        return matcher;
+    }
+}
+
+function readEmbeddedImage(element) {
+    return readXmlElement(element, {
         relationships: {
             "rId5": {target: "media/hat.png"}
         },
         contentTypes: fakeContentTypes,
         docxFile: createFakeDocxFile({
-            "word/media/hat.png": imageBuffer
+            "word/media/hat.png": IMAGE_BUFFER
         })
     });
-    var result = reader.readXmlElement(imagedataElement);
-    assert.deepEqual(result.messages, []);
-    var element = result.value;
-    assert.equal("image", element.type);
-    assert.equal(element.altText, "It's a hat");
-    assert.equal(element.contentType, "image/png");
-    return element.read()
-        .then(function(readValue) {
-            assert.equal(readValue, imageBuffer);
-        });
+}
+
+test("can read imagedata elements with r:id attribute", function() {
+    var imagedataElement = new XmlElement("v:imagedata", {
+        "r:id": IMAGE_RELATIONSHIP_ID,
+        "o:title": "It's a hat"
+    });
+    
+    var result = readEmbeddedImage(imagedataElement);
+    
+    return promiseThat(result, isSuccess(isImage({
+        altText: "It's a hat",
+        contentType: "image/png",
+        buffer: IMAGE_BUFFER
+    })));
+});
+
+test("when v:imagedata element has no relationship ID then it is ignored with warning", function() {
+    var imagedataElement = new XmlElement("v:imagedata");
+    
+    var result = readXmlElement(imagedataElement);
+    
+    assert.deepEqual(result.value, []);
+    assert.deepEqual(result.messages, [warning("A v:imagedata element without a relationship ID was ignored")]);
 });
 
 test("can read inline pictures", function() {
     var drawing = createInlineImage({
-        blip: createEmbeddedBlip("rId5"),
+        blip: createEmbeddedBlip(IMAGE_RELATIONSHIP_ID),
         description: "It's a hat"
     });
     
-    var imageBuffer = new Buffer("Not an image at all!");
-    var reader = new BodyReader({
-        relationships: {
-            "rId5": {target: "media/hat.png"}
-        },
-        contentTypes: fakeContentTypes,
-        docxFile: createFakeDocxFile({
-            "word/media/hat.png": imageBuffer
-        })
+    var result = readEmbeddedImage(drawing);
+    
+    return promiseThat(result, isSuccess(contains(isImage({
+        altText: "It's a hat",
+        contentType: "image/png",
+        buffer: IMAGE_BUFFER
+    }))));
+});
+
+test("alt text title is used if alt text description is missing", function() {
+    var drawing = createInlineImage({
+        blip: createEmbeddedBlip(IMAGE_RELATIONSHIP_ID),
+        title: "It's a hat"
     });
-    var result = reader.readXmlElement(drawing);
-    assert.deepEqual(result.messages, []);
-    var element = single(result.value);
-    assert.equal("image", element.type);
-    assert.equal(element.altText, "It's a hat");
-    assert.equal(element.contentType, "image/png");
-    return element.read()
-        .then(function(readValue) {
-            assert.equal(readValue, imageBuffer);
-        });
+    
+    var result = readEmbeddedImage(drawing);
+    
+    return promiseThat(result, isSuccess(contains(isImage({
+        altText: "It's a hat"
+    }))));
+});
+
+test("alt text title is used if alt text description is blank", function() {
+    var drawing = createInlineImage({
+        blip: createEmbeddedBlip(IMAGE_RELATIONSHIP_ID),
+        description: " ",
+        title: "It's a hat"
+    });
+    
+    var result = readEmbeddedImage(drawing);
+    
+    return promiseThat(result, isSuccess(contains(isImage({
+        altText: "It's a hat"
+    }))));
+});
+
+test("alt text description is preferred to alt text title", function() {
+    var drawing = createInlineImage({
+        blip: createEmbeddedBlip(IMAGE_RELATIONSHIP_ID),
+        description: "It's a hat",
+        title: "hat"
+    });
+    
+    var result = readEmbeddedImage(drawing);
+    
+    return promiseThat(result, isSuccess(contains(isImage({
+        altText: "It's a hat"
+    }))));
 });
 
 test("can read anchored pictures", function() {
@@ -455,7 +571,7 @@ test("can read anchored pictures", function() {
                 new XmlElement("a:graphicData", {}, [
                     new XmlElement("pic:pic", {}, [
                         new XmlElement("pic:blipFill", {}, [
-                            new XmlElement("a:blip", {"r:embed": "rId5"})
+                            new XmlElement("a:blip", {"r:embed": IMAGE_RELATIONSHIP_ID})
                         ])
                     ])
                 ])
@@ -463,25 +579,13 @@ test("can read anchored pictures", function() {
         ])
     ]);
     
-    var imageBuffer = new Buffer("Not an image at all!");
-    var reader = new BodyReader({
-        relationships: {
-            "rId5": {target: "media/hat.png"}
-        },
-        contentTypes: fakeContentTypes,
-        docxFile: createFakeDocxFile({
-            "word/media/hat.png": imageBuffer
-        })
-    });
-    var result = reader.readXmlElement(drawing);
-    assert.deepEqual(result.messages, []);
-    var element = single(result.value);
-    assert.equal("image", element.type);
-    assert.equal(element.altText, "It's a hat");
-    return element.read()
-        .then(function(readValue) {
-            assert.equal(readValue, imageBuffer);
-        });
+    var result = readEmbeddedImage(drawing);
+    
+    return promiseThat(result, isSuccess(contains(isImage({
+        altText: "It's a hat",
+        contentType: "image/png",
+        buffer: IMAGE_BUFFER
+    }))));
 });
 
 test("can read linked pictures", function() {
@@ -490,26 +594,20 @@ test("can read linked pictures", function() {
         description: "It's a hat"
     });
     
-    var imageBuffer = new Buffer("Not an image at all!");
-    var reader = new BodyReader({
+    var element = single(readXmlElementValue(drawing, {
         relationships: {
             "rId5": {target: "file:///media/hat.png"}
         },
         contentTypes: fakeContentTypes,
         files: testing.createFakeFiles({
-            "file:///media/hat.png": imageBuffer
+            "file:///media/hat.png": IMAGE_BUFFER
         })
-    });
-    var result = reader.readXmlElement(drawing);
-    assert.deepEqual(result.messages, []);
-    var element = single(result.value);
-    assert.equal("image", element.type);
-    assert.equal(element.altText, "It's a hat");
-    assert.equal(element.contentType, "image/png");
-    return element.read()
-        .then(function(readValue) {
-            assert.equal(readValue, imageBuffer);
-        });
+    }));
+    return promiseThat(element, isImage({
+        altText: "It's a hat",
+        contentType: "image/png",
+        buffer: IMAGE_BUFFER
+    }));
 });
 
 test("warning if unsupported image type", function() {
@@ -518,17 +616,15 @@ test("warning if unsupported image type", function() {
         description: "It's a hat"
     });
     
-    var imageBuffer = new Buffer("Not an image at all!");
-    var reader = new BodyReader({
+    var result = readXmlElement(drawing, {
         relationships: {
             "rId5": {target: "media/hat.emf"}
         },
         contentTypes: fakeContentTypes,
         docxFile: createFakeDocxFile({
-            "word/media/hat.emf": imageBuffer
+            "word/media/hat.emf": IMAGE_BUFFER
         })
     });
-    var result = reader.readXmlElement(drawing);
     assert.deepEqual(result.messages, [warning("Image of type image/x-emf is unlikely to display in web browsers")]);
     var element = single(result.value);
     assert.equal(element.contentType, "image/x-emf");
@@ -537,8 +633,7 @@ test("warning if unsupported image type", function() {
 test("no elements created if image cannot be found in w:drawing", function() {
     var drawing = new XmlElement("w:drawing", {}, []);
     
-    var reader = new BodyReader({});
-    var result = reader.readXmlElement(drawing);
+    var result = readXmlElement(drawing);
     assert.deepEqual(result.messages, []);
     assert.deepEqual(result.value, []);
 });
@@ -546,8 +641,7 @@ test("no elements created if image cannot be found in w:drawing", function() {
 test("no elements created if image cannot be found in wp:inline", function() {
     var drawing = new XmlElement("wp:inline", {}, []);
     
-    var reader = new BodyReader({});
-    var result = reader.readXmlElement(drawing);
+    var result = readXmlElement(drawing);
     assert.deepEqual(result.messages, []);
     assert.deepEqual(result.value, []);
 });
@@ -720,7 +814,7 @@ function single(array) {
 function createInlineImage(options) {
     return new XmlElement("w:drawing", {}, [
         new XmlElement("wp:inline", {}, [
-            new XmlElement("wp:docPr", {descr: options.description}),
+            new XmlElement("wp:docPr", {descr: options.description, title: options.title}),
             new XmlElement("a:graphic", {}, [
                 new XmlElement("a:graphicData", {}, [
                     new XmlElement("pic:pic", {}, [
@@ -740,4 +834,11 @@ function createEmbeddedBlip(relationshipId) {
 
 function createLinkedBlip(relationshipId) {
     return new XmlElement("a:blip", {"r:link": relationshipId});
+}
+
+function assertImageBuffer(element, expectedImageBuffer) {
+    return element.read()
+        .then(function(readValue) {
+            assert.equal(readValue, expectedImageBuffer);
+        });
 }

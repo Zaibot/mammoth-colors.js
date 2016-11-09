@@ -1,3 +1,36 @@
+# 1.2.5
+
+* Ignore bold, italic, underline and strikethrough elements that have a value of
+  false or 0.
+
+# 1.2.4
+
+* Ignore v:imagedata elements without relationship ID with warning.
+
+# 1.2.3
+
+* Expect end token when parsing style mappings. This causes warnings to be
+  emitted instead of silenting ignoring unparsed tokens.
+
+# 1.2.2
+
+* Ignore blank lines in style map.
+
+# 1.2.1
+
+* Use alt text title as alt text for images when the alt text description is
+  missing entirely.
+
+# 1.2.0
+
+* Throw more informative error when word/document.xml cannot be found.
+
+* Generate messages of type "error" instead of "warning" when image conversion
+  throws an exception.
+  
+* Use alt text title as alt text for images when the alt text description is
+  blank.
+
 # 1.1.0
 
 * Add support for comments.

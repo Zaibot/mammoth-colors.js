@@ -191,12 +191,13 @@ test('images stored outside of document are included in output', function() {
     });
 });
 
-test('warn if images stored outside of document are specified when passing file without path', function() {
+test('error if images stored outside of document are specified when passing file without path', function() {
     var docxPath = path.join(__dirname, "test-data/external-picture.docx");
     var buffer = fs.readFileSync(docxPath);
     return mammoth.convertToHtml({buffer: buffer}).then(function(result) {
         assert.equal(result.value, '');
-        assert.deepEqual(result.messages, [results.warning("could not find external image 'tiny-picture.png', path of input document is unknown")]);
+        assert.equal(result.messages[0].message, "could not find external image 'tiny-picture.png', path of input document is unknown");
+        assert.equal(result.messages[0].type, "error");
     });
 });
 
@@ -367,4 +368,14 @@ test('extractRawText can use .docx files represented by a Buffer', function() {
             assert.equal(result.value, "Walking on imported air\n\n");
             assert.deepEqual(result.messages, []);
         });
+});
+
+
+test('should throw error if file is not a valid docx document', function() {
+    var docxPath = path.join(__dirname, "test-data/empty.zip");
+    return mammoth.convertToHtml({path: docxPath}).then(function(result) {
+        assert.ok(false, "Expected error");
+    }, function(error) {
+        assert.equal(error.message, "Could not find word/document.xml in ZIP file. Are you sure this is a valid .docx file?");
+    });
 });
