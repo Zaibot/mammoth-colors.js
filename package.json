@@ -18,22 +18,23 @@
     "url": "https://github.com/sbabushkin/mammoth-colors.js.git"
   },
   "dependencies": {
+    "argparse": "~1.0.3",
     "bluebird": "~3.4.0",
+    "clone": "~1.0.2",
+    "eslint": "^2.13.1",
+    "jszip": "~2.5.0",
+    "lop": "~0.4.0",
+    "path-is-absolute": "^1.0.0",
     "sax": "~1.1.1",
     "underscore": "~1.6.0",
-    "lop": "~0.4.0",
-    "argparse": "~1.0.3",
-    "jszip": "~2.5.0",
-    "xmlbuilder": "~2.6.4",
-    "path-is-absolute": "^1.0.0",
-    "clone": "~1.0.2"
+    "xmlbuilder": "~2.6.4"
   },
   "devDependencies": {
     "mocha": "~2.2.5",
     "browserify": "~13.0.1",
     "browserify-prepend-licenses": "~1.0.0",
     "duck": "~0.1.11",
-    "uglify-js": "~2.4.8",
+    "uglify-js": "^2.4.24",
     "temp": "~0.7.0",
     "eslint": "2.13.1",
     "hamjest": "2.13.0",
@@ -51,5 +52,6 @@
     "test": "mocha 'test/**/*.tests.js'",
     "prepublish": "make mammoth.browser.min.js"
   },
+  "types": "mammoth.d.ts",
   "license": "BSD-2-Clause"
 }
